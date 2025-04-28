@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
 
 # --- Tax Settings ---
-FEDERAL_BRACKETS_2025 = [
+FEDERAL_BRACKETS_2025_SINGLE = [
     (0, 0.10),
     (11925, 0.12),
     (48475, 0.22),
@@ -14,14 +14,25 @@ FEDERAL_BRACKETS_2025 = [
     (626350, 0.37),
 ]
 
-VIRGINIA_BRACKETS_2025 = [
+FEDERAL_BRACKETS_2025_MARRIED = [
+    (0, 0.10),
+    (23850, 0.12),
+    (96950, 0.22),
+    (206700, 0.24),
+    (394600, 0.32),
+    (501050, 0.35),
+    (752600, 0.37),
+]
+
+VIRGINIA_BRACKETS_2025 = [  # VA same for everyone
     (0, 0.02),
     (3000, 0.03),
     (5000, 0.05),
     (17000, 0.0575),
 ]
 
-STANDARD_DEDUCTION_2025 = 15000
+STANDARD_DEDUCTION_2025_SINGLE = 15000
+STANDARD_DEDUCTION_2025_MARRIED = 30000
 
 # --- Functions ---
 def calculate_tax(taxable_income, brackets):
@@ -41,6 +52,9 @@ st.set_page_config(page_title="🔥 FIRE Tax + FI Planner 2025", layout="wide")
 st.title("🔥 FIRE Tax + FI Planner 2025 (Federal + Virginia) 🔥")
 
 # --- Sidebar Inputs ---
+st.sidebar.header("Filing Status")  # NEW
+filing_status = st.sidebar.selectbox("Select Filing Status", ["Single", "Married Filing Jointly"])  # NEW
+
 st.sidebar.header("Income & Expenses")
 gross_salary = st.sidebar.number_input("Gross Salary ($)", value=100000, step=1000)
 pension_percent = st.sidebar.slider("Pension Contribution (% of Salary)", 0, 20, 5) / 100
@@ -76,15 +90,22 @@ for account, enabled in account_types.items():
     if enabled:
         contributions[account] = st.sidebar.number_input(f"{account} Contribution ($)", value=0, step=500)
 
+# --- Determine correct brackets and deduction ---
+if filing_status == "Single":
+    federal_brackets = FEDERAL_BRACKETS_2025_SINGLE
+    standard_deduction = STANDARD_DEDUCTION_2025_SINGLE
+else:
+    federal_brackets = FEDERAL_BRACKETS_2025_MARRIED
+    standard_deduction = STANDARD_DEDUCTION_2025_MARRIED
+
 # --- Main Calculations ---
 if st.sidebar.button("🚀 Run FIRE Simulation"):
-    
     pension_contribution = gross_salary * pension_percent
-    
+
     # Reduce AGI by pension + traditional pre-tax contributions
     agi = gross_salary - pension_contribution
     agi_reducing_accounts = [
-        "403(b) Traditional", "457(b) Traditional", 
+        "403(b) Traditional", "457(b) Traditional",
         "401(a) Employee", "Solo 401(k) Employee",
         "SEP IRA", "SIMPLE IRA", "Traditional IRA",
         "HSA", "FSA"
@@ -97,26 +118,21 @@ if st.sidebar.button("🚀 Run FIRE Simulation"):
     va_529_deduction = min(contributions.get("529 Plan", 0), 4000)
     agi -= va_529_deduction
     
-    taxable_income = max(agi - STANDARD_DEDUCTION_2025, 0)
-    
-    federal_tax = calculate_tax(taxable_income, FEDERAL_BRACKETS_2025)
+    taxable_income = max(agi - standard_deduction, 0)
+
+    federal_tax = calculate_tax(taxable_income, federal_brackets)
     state_tax = calculate_tax(taxable_income, VIRGINIA_BRACKETS_2025)
     total_tax = federal_tax + state_tax
-    
-    # Calculate effective tax rate based on gross salary
+
     effective_tax_rate = total_tax / gross_salary if gross_salary > 0 else 0
-    
-    # Fix after-tax income calculation
     after_tax_income = gross_salary - pension_contribution - total_tax
-    
-    # Total Contributions
+
     total_savings = sum(contributions.values())
     savings_rate = total_savings / gross_salary if gross_salary > 0 else 0
-    
-    # Calculate disposable income (after taxes and post-tax savings)
+
     post_tax_savings = total_savings - sum(contributions.get(account, 0) for account in agi_reducing_accounts) - va_529_deduction
     disposable_income = after_tax_income - post_tax_savings
-    
+
     # --- FIRE Financial Summary ---
     st.subheader("📋 FIRE Financial Summary")
     fire_summary = pd.DataFrame({
@@ -147,12 +163,12 @@ if st.sidebar.button("🚀 Run FIRE Simulation"):
     })
     
     st.dataframe(fire_summary)
-    
+
     # --- Contributions Table ---
     st.subheader("📚 Contributions Detail")
     contribs = [(k, v) for k, v in contributions.items()]
     st.dataframe(pd.DataFrame(contribs, columns=["Account", "Annual Contribution ($)"]))
-    
+
     # --- Pie Chart Money Flow ---
     st.subheader("📊 Money Flow Chart")
     labels = ["Federal Taxes", "State Taxes", "Savings", "After-Tax Disposable Income"]
@@ -165,12 +181,12 @@ if st.sidebar.button("🚀 Run FIRE Simulation"):
 
     # --- Contribution Impact Summary ---
     st.subheader("🚀 Contribution Impact Summary")
-    baseline_taxable_income = gross_salary - STANDARD_DEDUCTION_2025
-    baseline_federal_tax = calculate_tax(baseline_taxable_income, FEDERAL_BRACKETS_2025)
+    baseline_taxable_income = gross_salary - standard_deduction
+    baseline_federal_tax = calculate_tax(baseline_taxable_income, federal_brackets)
     baseline_state_tax = calculate_tax(baseline_taxable_income, VIRGINIA_BRACKETS_2025)
     baseline_total_tax = baseline_federal_tax + baseline_state_tax
     baseline_after_tax_income = gross_salary - baseline_total_tax
-    
+
     st.write(f"**Reduction in Total Taxes Paid:** ${baseline_total_tax - total_tax:,.0f}")
     st.write(f"**Increase in Total Annual Savings:** ${total_savings:,.0f}")
     st.write(f"**Change in After-Tax Income:** ${after_tax_income - baseline_after_tax_income:,.0f}")
@@ -196,60 +212,50 @@ if st.sidebar.button("🚀 Run FIRE Simulation"):
         "Fat FI (150% Expenses)": False,
     }
     
-    # Calculate Coast FI target (amount needed now to grow to Full FI by retirement age without further contributions)
     years_to_retirement = retirement_age - current_age
     full_fi_target = annual_expenses * 25
     coast_fi_target = full_fi_target / ((1 + expected_return) ** years_to_retirement)
-    
-    # Calculate Barista FI (assuming 50% of expenses covered by investments, rest by part-time work)
     barista_fi_target = (annual_expenses * 0.5) * 25
-    
+
     for year in range(1, 51):
         invest_value = invest_value * (1 + expected_return) + annual_contrib
         balances.append(invest_value)
         years.append(year)
         
         if not milestones["Coast FI"] and invest_value >= coast_fi_target:
-            if year == 1 and invest_value >= coast_fi_target:
-                milestones["Coast FI"] = "✅ Already Achieved"
-            else:
-                milestones["Coast FI"] = f"{year} years"
+            milestones["Coast FI"] = "✅ Already Achieved" if year == 1 else f"{year} years"
                 
         if not milestones["Barista FI"] and invest_value >= barista_fi_target:
-            if year == 1 and invest_value >= barista_fi_target:
-                milestones["Barista FI"] = "✅ Already Achieved"
-            else:
-                milestones["Barista FI"] = f"{year} years"
+            milestones["Barista FI"] = "✅ Already Achieved" if year == 1 else f"{year} years"
                 
         if not milestones["Lean FI (75% Expenses)"] and invest_value >= (annual_expenses * 0.75) * 25:
-            milestones["Lean FI (75% Expenses)"] = f"{year} years" if year > 0 else "✅ Already Achieved"
+            milestones["Lean FI (75% Expenses)"] = "✅ Already Achieved" if year == 1 else f"{year} years"
             
         if not milestones["Full FI (100% Expenses)"] and invest_value >= annual_expenses * 25:
-            milestones["Full FI (100% Expenses)"] = f"{year} years" if year > 0 else "✅ Already Achieved"
+            milestones["Full FI (100% Expenses)"] = "✅ Already Achieved" if year == 1 else f"{year} years"
             
         if not milestones["Fat FI (150% Expenses)"] and invest_value >= (annual_expenses * 1.5) * 25:
-            milestones["Fat FI (150% Expenses)"] = f"{year} years" if year > 0 else "✅ Already Achieved"
-            
+            milestones["Fat FI (150% Expenses)"] = "✅ Already Achieved" if year == 1 else f"{year} years"
+    
     milestone_table = pd.DataFrame(list(milestones.items()), columns=["Milestone", "Time to Achieve"])
     st.table(milestone_table)
-    
-    # --- Milestone Explanations (Moved Above Chart) ---
+
+    # --- Milestone Explanations ---
     st.subheader("📖 What the Milestones Mean")
-    st.markdown("""
-    - **Coast FI**: Investments grow enough by retirement age (set to {retirement_age} years) even without adding new savings.
-    - **Barista FI**: Investments cover 50% of expenses; part-time work can bridge the gap.
-    - **Lean FI**: Investments = 75% of your full annual expenses.
-    - **Full FI**: Investments = 100% of your full desired lifestyle expenses.
-    - **Fat FI**: Investments = 150% of your lifestyle expenses — extra cushion and luxury.
-    """.format(retirement_age=retirement_age))
-    
+    st.markdown(f"""
+    - **Coast FI**: Investments grow enough by retirement age ({retirement_age} years old) without new savings.
+    - **Barista FI**: Investments cover 50% of expenses; part-time work covers the rest.
+    - **Lean FI**: Investments = 75% of full expenses.
+    - **Full FI**: Investments = 100% of full desired lifestyle expenses.
+    - **Fat FI**: Investments = 150% of expenses (extra cushion/luxury).
+    """)
+
     # --- Net Worth Growth Chart ---
     st.subheader("📈 Investment Growth Over Time")
     fig2, ax2 = plt.subplots()
     ax2.plot(years, balances, label="Projected Portfolio Value")
     ax2.axhline(y=annual_expenses * 25, color='g', linestyle='--', label='Full FI Target (25x Expenses)')
     
-    # Format Y-axis to show dollar amounts (e.g., $500k, $800k, $1M)
     ax2.yaxis.set_major_formatter(ticker.FuncFormatter(lambda x, _: f'${int(x/1000)}k' if x < 1000000 else f'${x/1000000:.1f}M'))
     
     ax2.set_xlabel("Years")
